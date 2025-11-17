@@ -75,7 +75,7 @@ async function handleLogin(event) {
     const password = document.getElementById('loginPassword').value;
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/users/login', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/users/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
@@ -123,7 +123,7 @@ async function handleSignup(event) {
     }
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/users/register', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/users/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, username, email, password })
@@ -155,7 +155,7 @@ async function fetchActiveSessions() {
     sessionBody.innerHTML = '<tr><td colspan="4">Memuat sesi...</td></tr>';
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/admin/active-sessions', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/admin/active-sessions', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!response.ok) throw new Error('Gagal memuat sesi aktif');
@@ -191,7 +191,7 @@ async function checkLoginStatus() {
     if (!token) return;
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/users/profile', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/users/profile', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!response.ok) {
@@ -266,7 +266,7 @@ async function handleUpdateProfile(event) {
     const newEmail = document.getElementById('updateEmail').value;
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/users/profile', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/users/profile', {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
@@ -319,7 +319,7 @@ async function handleForceUnbook(event) {
     if (!confirm(`Anda yakin ingin memaksa PC ${pc_id} menjadi 'Tersedia'?`)) return;
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/admin/force-unbook', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/admin/force-unbook', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ pc_id })
@@ -349,7 +349,7 @@ async function handleAdjustTime(event) {
     if (!confirm(`Anda yakin ingin mengubah waktu user '${username}' sebanyak ${minutes} menit?`)) return;
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/admin/adjust-time', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/admin/adjust-time', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ username, minutes: parseInt(minutes, 10) })
@@ -380,7 +380,7 @@ async function fetchAuditLog() {
     logBody.innerHTML = '<tr><td colspan="4">Memuat log...</td></tr>';
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/admin/audit-log', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/admin/audit-log', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!response.ok) throw new Error('Gagal memuat log');
@@ -418,7 +418,7 @@ async function fetchAdminMenu() {
     menuBody.innerHTML = '<tr><td colspan="5">Memuat menu...</td></tr>';
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/admin/menu', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/admin/menu', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!response.ok) throw new Error('Gagal memuat menu');
@@ -468,7 +468,7 @@ async function handleMenuFormSubmit(event) {
         icon: document.getElementById('menu-item-icon').value
     };
 
-    const url = isEditing ? `playnet-project-production.up.railway.app/api/admin/menu/${itemId}` : 'playnet-project-production.up.railway.app/api/admin/menu';
+    const url = isEditing ? `https://playnet-project-production.up.railway.app/api/admin/menu/${itemId}` : 'https://playnet-project-production.up.railway.app/api/admin/menu';
     const method = isEditing ? 'PUT' : 'POST';
 
     // Saat 'Edit', kita gunakan ID dari data, bukan dari input 'ID Item'
@@ -516,7 +516,7 @@ async function deleteMenuItem(id, name) {
 
     const token = localStorage.getItem('playnetToken');
     try {
-        const response = await fetch(`playnet-project-production.up.railway.app/api/admin/menu/${id}`, {
+        const response = await fetch(`https://playnet-project-production.up.railway.app/api/admin/menu/${id}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -552,7 +552,7 @@ async function initializePCGrid() {
     if (!pcGrid) return;
     pcGrid.innerHTML = '<p style="color: #666;">Loading PC...</p>';
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/pcs');
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/pcs');
         if (!response.ok) throw new Error('Gagal mengambil data PC');
         const pcStatusFromBackend = await response.json();
         
@@ -609,7 +609,7 @@ async function populateGameGrid(filter = 'all') {
     if (!gameGrid) return;
     gameGrid.innerHTML = '<p style="color: #666; text-align: center;">Loading data game...</p>';
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/games');
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/games');
         if (!response.ok) throw new Error(`Gagal mengambil data game: ${response.statusText}`);
         const allGames = await response.json();
         gameGrid.innerHTML = '';
@@ -677,7 +677,7 @@ async function populateFoodMenus(gridId, type) {
     grid.innerHTML = '<p style="color: #666;">Loading menu...</p>';
     if (globalFoodMenu.length === 0) {
         try {
-            const response = await fetch('playnet-project-production.up.railway.app/api/food/menu');
+            const response = await fetch('https://playnet-project-production.up.railway.app/api/food/menu');
             if (!response.ok) throw new Error('Gagal mengambil menu');
             globalFoodMenu = await response.json();
         } catch (error) {
@@ -788,7 +788,7 @@ async function handlePayment() {
     };
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/booking', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/booking', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify(bookingData)
@@ -884,7 +884,7 @@ async function handleFoodOrder() {
     orderButton.textContent = 'Mengirim...';
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/food/order', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/food/order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ pcNumber, items: orderItems })
@@ -917,7 +917,7 @@ async function fetchTransactionHistory() {
     if (!token) return;
 
     try {
-        const response = await fetch('playnet-project-production.up.railway.app/api/booking/history', {
+        const response = await fetch('https://playnet-project-production.up.railway.app/api/booking/history', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
 
