@@ -1,0 +1,1018 @@
+// Variabel global untuk menyimpan data sementara
+let currentLoggedInUser = null;
+let selectedPC = null;
+let selectedDuration = { hours: 0, price: 0 };
+let selectedPayment = null;
+let selectedAddons = [];
+let globalFoodMenu = []; // Menyimpan menu dari DB
+
+// --- FUNGSI HELPER BARU (FITUR #3) ---
+/**
+ * Menampilkan pesan sukses atau error di halaman, menggantikan alert().
+ * @param {string} elementId - ID dari elemen <p> untuk menampilkan pesan.
+ * @param {string} message - Teks pesan yang akan ditampilkan.
+ * @param {boolean} isError - true jika error (merah), false jika sukses (hijau).
+ */
+function showMessage(elementId, message, isError = true) {
+    const msgElement = document.getElementById(elementId);
+    if (!msgElement) return; // Keluar jika elemen tidak ada
+    
+    msgElement.textContent = message;
+    msgElement.className = isError ? 'message error' : 'message success';
+    msgElement.style.display = 'block';
+
+    // Sembunyikan pesan setelah 5 detik
+    setTimeout(() => {
+        msgElement.style.display = 'none';
+    }, 5000);
+}
+
+
+// --- FUNGSI UTAMA NAVIGASI ---
+function showPage(pageId) {
+    const pages = document.querySelectorAll('.page-content');
+    pages.forEach(page => {
+        page.classList.remove('active');
+    });
+    const activePage = document.getElementById(pageId);
+    if (activePage) {
+        activePage.classList.add('active');
+    }
+
+    // Perbarui judul booking jika pindah ke halaman booking
+    if (pageId === 'booking' && selectedPC) {
+        document.getElementById('bookingPC').textContent = `(PC ${selectedPC})`;
+    } else if (pageId === 'booking') {
+        document.getElementById('bookingPC').textContent = '(Pilih PC dulu!)';
+    }
+
+    // FITUR #1: Muat data admin HANYA saat halaman admin dibuka
+    if (pageId === 'admin') {
+        fetchActiveSessions();
+        fetchAdminMenu();
+        fetchAuditLog();
+    }
+    
+    // Reset form login
+    if (pageId === 'auth') {
+        showLogin();
+        document.getElementById('login-message').style.display = 'none';
+    }
+}
+
+// --- FUNGSI HALAMAN AUTH ---
+async function handleLogin(event) {
+    event.preventDefault(); 
+    const loginButton = event.target.querySelector('button');
+    const errorMsg = document.getElementById('login-message');
+    
+    // Reset UI
+    loginButton.disabled = true;
+    loginButton.textContent = 'Loading...';
+    errorMsg.style.display = 'none';
+
+    const username = document.getElementById('loginUsername').value;
+    const password = document.getElementById('loginPassword').value;
+
+    try {
+        const response = await fetch('http://localhost:3000/api/users/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Login gagal.');
+
+        localStorage.setItem('playnetToken', data.token);
+        
+        data.user.remaining_time_minutes = data.user.remainingTime;
+        delete data.user.remainingTime;
+        currentLoggedInUser = data.user; 
+        
+        updateUIOnLogin();
+        showPage('profile');
+
+    } catch (error) {
+        // FITUR #3: Tampilkan error di halaman
+        console.error('Login error:', error);
+        showMessage('login-message', error.message, true);
+    } finally {
+        loginButton.disabled = false;
+        loginButton.textContent = 'Login';
+    }
+}
+
+async function handleSignup(event) {
+    event.preventDefault();
+    const signupButton = event.target.querySelector('button');
+    signupButton.disabled = true;
+    signupButton.textContent = 'Mendaftar...';
+
+    const name = document.getElementById('signupName').value;
+    const username = document.getElementById('signupUsername').value;
+    const email = document.getElementById('signupEmail').value;
+    const password = document.getElementById('signupPassword').value;
+    const confirmPassword = document.getElementById('signupConfirmPassword').value;
+
+    if (password !== confirmPassword) {
+        // Alert di sini masih oke karena ini validasi form
+        alert('Password dan Konfirmasi Password tidak cocok!');
+        signupButton.disabled = false;
+        signupButton.textContent = 'Daftar';
+        return;
+    }
+
+    try {
+        const response = await fetch('http://localhost:3000/api/users/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, username, email, password })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Registrasi gagal.');
+
+        // FITUR #3: Tampilkan pesan sukses di halaman Login
+        showLogin(); 
+        showMessage('login-message', data.message, false); // Tampilkan di form login
+
+    } catch (error) {
+        console.error('Signup error:', error);
+        alert(`Registrasi Gagal: ${error.message}`); // Boleh pakai alert di sini
+    } finally {
+        signupButton.disabled = false;
+        signupButton.textContent = 'Daftar';
+    }
+}
+
+
+/**
+ * BARU: Mengambil sesi PC yang sedang aktif
+ */
+async function fetchActiveSessions() {
+    const sessionBody = document.getElementById('active-sessions-body');
+    const token = localStorage.getItem('playnetToken');
+    sessionBody.innerHTML = '<tr><td colspan="4">Memuat sesi...</td></tr>';
+
+    try {
+        const response = await fetch('http://localhost:3000/api/admin/active-sessions', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error('Gagal memuat sesi aktif');
+        
+        const sessions = await response.json();
+        sessionBody.innerHTML = ''; // Kosongkan
+        
+        if (sessions.length === 0) {
+            sessionBody.innerHTML = '<tr><td colspan="4">Tidak ada sesi PC yang aktif.</td></tr>';
+            return;
+        }
+
+        sessions.forEach(session => {
+            const date = new Date(session.created_at);
+            const formattedDate = date.toLocaleString('id-ID', { short: true });
+            sessionBody.innerHTML += `
+                <tr>
+                    <td><strong>PC ${session.pc_id}</strong></td>
+                    <td>${session.username}</td>
+                    <td>${formattedDate}</td>
+                    <td>${session.duration_hours} Jam</td>
+                </tr>
+            `;
+        });
+    } catch (error) {
+        console.error(error);
+        sessionBody.innerHTML = `<tr><td colspan="4" style="color: red;">${error.message}</td></tr>`;
+    }
+}
+
+async function checkLoginStatus() {
+    const token = localStorage.getItem('playnetToken');
+    if (!token) return;
+
+    try {
+        const response = await fetch('http://localhost:3000/api/users/profile', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) {
+            localStorage.removeItem('playnetToken');
+            throw new Error('Sesi tidak valid.');
+        }
+        currentLoggedInUser = await response.json();
+        // (Backend /profile sekarang sudah kirim 'is_admin' berkat perbaikan di Langkah 1)
+        
+        updateUIOnLogin();
+    } catch (error) {
+        console.error('Gagal memulihkan sesi:', error.message);
+    }
+}
+
+function updateUIOnLogin() {
+    document.getElementById('authLink').style.display = 'none';
+    document.getElementById('profileLink').style.display = 'block';
+    document.getElementById('logoutLink').style.display = 'block';
+    
+    if (currentLoggedInUser && currentLoggedInUser.is_admin === 1) {
+        document.getElementById('adminLink').style.display = 'block';
+    }
+    
+    document.getElementById('profileName').textContent = currentLoggedInUser.name;
+    document.getElementById('profileId').textContent = `ID: PLN${currentLoggedInUser.id}`;
+    
+    const timeInMinutes = currentLoggedInUser.remaining_time_minutes || 0;
+    const hours = Math.floor(timeInMinutes / 60);
+    const minutes = timeInMinutes % 60;
+    document.getElementById('remainingTime').textContent = `${hours} Jam ${minutes} Menit`;
+    
+    document.getElementById('updateName').value = currentLoggedInUser.name;
+    document.getElementById('updateEmail').value = currentLoggedInUser.email;
+
+    fetchTransactionHistory();
+}
+
+function handleLogout() {
+    localStorage.removeItem('playnetToken');
+    currentLoggedInUser = null;
+    document.getElementById('profileLink').style.display = 'none';
+    document.getElementById('logoutLink').style.display = 'none';
+    document.getElementById('adminLink').style.display = 'none';
+    document.getElementById('authLink').style.display = 'block';
+    
+    document.getElementById('profileName').textContent = 'Guest User';
+    document.getElementById('profileId').textContent = 'ID: -';
+    document.getElementById('remainingTime').textContent = '0 Jam 0 Menit';
+    document.getElementById('transactionHistory').innerHTML = '<p style="color: #666; text-align: center;">Belum ada riwayat transaksi</p>';
+    
+    showPage('home');
+}
+
+// FITUR #2: Fungsi Update Profile (Sekarang Terhubung)
+async function handleUpdateProfile(event) {
+    event.preventDefault();
+    const updateButton = event.target.querySelector('button');
+    const msgElement = document.getElementById('profile-message');
+    updateButton.disabled = true;
+    updateButton.textContent = 'Menyimpan...';
+    msgElement.style.display = 'none';
+
+    const token = localStorage.getItem('playnetToken');
+    if (!token) {
+        showMessage('profile-message', 'Sesi tidak valid, silakan login ulang.', true);
+        handleLogout();
+        return;
+    }
+
+    const newName = document.getElementById('updateName').value;
+    const newEmail = document.getElementById('updateEmail').value;
+
+    try {
+        const response = await fetch('http://localhost:3000/api/users/profile', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ name: newName, email: newEmail })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Gagal update profil.');
+
+        showMessage('profile-message', data.message, false); // Sukses
+        
+        currentLoggedInUser.name = newName;
+        currentLoggedInUser.email = newEmail;
+        document.getElementById('profileName').textContent = newName;
+
+    } catch (error) {
+        console.error('Update profile error:', error);
+        showMessage('profile-message', error.message, true); // Error
+    } finally {
+        updateButton.disabled = false;
+        updateButton.textContent = 'Update Profil';
+    }
+}
+
+// Fungsi ganti form
+function showSignup() {
+    document.getElementById('loginForm').style.display = 'none';
+    document.getElementById('forgotForm').style.display = 'none';
+    document.getElementById('signupForm').style.display = 'block';
+}
+function showLogin() {
+    document.getElementById('signupForm').style.display = 'none';
+    document.getElementById('forgotForm').style.display = 'none';
+    document.getElementById('loginForm').style.display = 'block';
+}
+function showForgotPassword() {
+    document.getElementById('loginForm').style.display = 'none';
+    document.getElementById('signupForm').style.display = 'none';
+    document.getElementById('forgotForm').style.display = 'block';
+}
+
+// --- FUNGSI PANEL ADMIN ---
+async function handleForceUnbook(event) {
+    event.preventDefault();
+    const pc_id = document.getElementById('adminUnbookPC').value;
+    const token = localStorage.getItem('playnetToken');
+
+    if (!confirm(`Anda yakin ingin memaksa PC ${pc_id} menjadi 'Tersedia'?`)) return;
+
+    try {
+        const response = await fetch('http://localhost:3000/api/admin/force-unbook', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ pc_id })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Gagal, Anda bukan admin.');
+
+        showMessage('unbook-message', data.message, false);
+        document.getElementById('adminUnbookPC').value = '';
+        initializePCGrid(); 
+        fetchActiveSessions();
+        fetchAuditLog(); // Muat ulang log
+
+    } catch (error) {
+        console.error('Force unbook error:', error);
+        showMessage('unbook-message', error.message, true);
+    }
+}
+
+// FITUR #1: Fungsi Admin untuk mengubah waktu user
+async function handleAdjustTime(event) {
+    event.preventDefault();
+    const token = localStorage.getItem('playnetToken');
+    const username = document.getElementById('adminAdjUser').value;
+    const minutes = document.getElementById('adminAdjMinutes').value;
+
+    if (!confirm(`Anda yakin ingin mengubah waktu user '${username}' sebanyak ${minutes} menit?`)) return;
+
+    try {
+        const response = await fetch('http://localhost:3000/api/admin/adjust-time', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ username, minutes: parseInt(minutes, 10) })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message);
+
+        showMessage('adjust-time-message', data.message, false);
+        document.getElementById('adminAdjUser').value = '';
+        document.getElementById('adminAdjMinutes').value = '';
+
+        if (currentLoggedInUser.username === username) {
+            currentLoggedInUser.remaining_time_minutes = data.newTime;
+            updateUIOnLogin(); // Update sisa waktu jika admin edit diri sendiri
+        }
+        fetchAuditLog(); // Muat ulang log
+
+    } catch (error) {
+        console.error('Adjust time error:', error);
+        showMessage('adjust-time-message', error.message, true);
+    }
+}
+
+// FITUR #1: Ambil data Log Audit
+async function fetchAuditLog() {
+    const logBody = document.getElementById('audit-log-body');
+    const token = localStorage.getItem('playnetToken');
+    logBody.innerHTML = '<tr><td colspan="4">Memuat log...</td></tr>';
+
+    try {
+        const response = await fetch('http://localhost:3000/api/admin/audit-log', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error('Gagal memuat log');
+        
+        const logs = await response.json();
+        logBody.innerHTML = ''; // Kosongkan
+        
+        if (logs.length === 0) {
+            logBody.innerHTML = '<tr><td colspan="4">Belum ada log.</td></tr>';
+            return;
+        }
+
+        logs.forEach(log => {
+            const date = new Date(log.created_at);
+            const formattedDate = date.toLocaleString('id-ID', { short: true });
+            logBody.innerHTML += `
+                <tr>
+                    <td>${log.admin_username}</td>
+                    <td>${log.action_type}</td>
+                    <td>${log.details}</td>
+                    <td>${formattedDate}</td>
+                </tr>
+            `;
+        });
+    } catch (error) {
+        console.error(error);
+        logBody.innerHTML = `<tr><td colspan="4" style="color: red;">${error.message}</td></tr>`;
+    }
+}
+
+// FITUR #1: Ambil data Menu
+async function fetchAdminMenu() {
+    const menuBody = document.getElementById('menu-table-body');
+    const token = localStorage.getItem('playnetToken');
+    menuBody.innerHTML = '<tr><td colspan="5">Memuat menu...</td></tr>';
+
+    try {
+        const response = await fetch('http://localhost:3000/api/admin/menu', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error('Gagal memuat menu');
+        
+        const menuItems = await response.json();
+        menuBody.innerHTML = '';
+        
+        if (menuItems.length === 0) {
+            menuBody.innerHTML = '<tr><td colspan="5">Menu masih kosong.</td></tr>';
+            return;
+        }
+
+        menuItems.forEach(item => {
+            menuBody.innerHTML += `
+                <tr>
+                    <td>${item.id}</td>
+                    <td>${item.name}</td>
+                    <td>Rp ${item.price.toLocaleString('id-ID')}</td>
+                    <td>${item.category}</td>
+                    <td>
+                        <button class="btn-edit" onclick="editMenuItem('${item.id}', '${item.name}', ${item.price}, '${item.category}', '${item.icon || ''}')">Edit</button>
+                        <button class="btn-delete" onclick="deleteMenuItem('${item.id}', '${item.name}')">Hapus</button>
+                    </td>
+                </tr>
+            `;
+        });
+    } catch (error) {
+        console.error(error);
+        menuBody.innerHTML = `<tr><td colspan="5" style="color: red;">${error.message}</td></tr>`;
+    }
+}
+
+// FITUR #1: Fungsi untuk form submit menu (Create/Update)
+async function handleMenuFormSubmit(event) {
+    event.preventDefault();
+    const token = localStorage.getItem('playnetToken');
+    
+    // Cek apakah kita sedang 'Edit' atau 'Tambah Baru'
+    const itemId = document.getElementById('menu-item-id').value;
+    const isEditing = itemId !== '';
+    
+    const data = {
+        id: document.getElementById('menu-item-id-input').value,
+        name: document.getElementById('menu-item-name').value,
+        price: parseInt(document.getElementById('menu-item-price').value, 10),
+        category: document.getElementById('menu-item-category').value,
+        icon: document.getElementById('menu-item-icon').value
+    };
+
+    const url = isEditing ? `http://localhost:3000/api/admin/menu/${itemId}` : 'http://localhost:3000/api/admin/menu';
+    const method = isEditing ? 'PUT' : 'POST';
+
+    // Saat 'Edit', kita gunakan ID dari data, bukan dari input 'ID Item'
+    if (isEditing) {
+        data.id = itemId; 
+    }
+
+    try {
+        const response = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message);
+
+        showMessage('menu-form-message', result.message, false);
+        clearMenuForm();
+        fetchAdminMenu(); // Muat ulang tabel menu
+        fetchAuditLog();  // Muat ulang log
+    } catch (error) {
+        console.error('Menu form error:', error);
+        showMessage('menu-form-message', error.message, true);
+    }
+}
+
+// FITUR #1: Fungsi untuk tombol 'Edit'
+function editMenuItem(id, name, price, category, icon) {
+    document.getElementById('menu-item-id').value = id; // ID tersembunyi untuk logika update
+    document.getElementById('menu-item-id-input').value = id;
+    document.getElementById('menu-item-id-input').readOnly = true; // Kunci ID saat edit
+    document.getElementById('menu-item-name').value = name;
+    document.getElementById('menu-item-price').value = price;
+    document.getElementById('menu-item-category').value = category;
+    document.getElementById('menu-item-icon').value = icon;
+    
+    document.getElementById('menu-form-button').textContent = 'Update Item';
+    document.getElementById('menu-form-button').style.background = '#f39c12';
+    window.scrollTo(0, document.getElementById('menu-form').offsetTop); // Scroll ke form
+}
+
+// FITUR #1: Fungsi untuk tombol 'Hapus'
+async function deleteMenuItem(id, name) {
+    if (!confirm(`Anda yakin ingin menghapus item "${name}" (ID: ${id})?`)) return;
+
+    const token = localStorage.getItem('playnetToken');
+    try {
+        const response = await fetch(`http://localhost:3000/api/admin/menu/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message);
+        
+        alert(result.message); // Boleh pakai alert di sini
+        fetchAdminMenu(); // Muat ulang tabel menu
+        fetchAuditLog();  // Muat ulang log
+
+    } catch (error) {
+        console.error('Delete item error:', error);
+        alert(`Gagal menghapus: ${error.message}`);
+    }
+}
+
+// FITUR #1: Fungsi untuk tombol 'Batal Edit'
+function clearMenuForm() {
+    document.getElementById('menu-form').reset();
+    document.getElementById('menu-item-id').value = ''; // Hapus ID tersembunyi
+    document.getElementById('menu-item-id-input').readOnly = false;
+    document.getElementById('menu-form-button').textContent = 'Tambah Item Baru';
+    document.getElementById('menu-form-button').style.background = '#964DFD';
+    document.getElementById('menu-form-message').style.display = 'none';
+}
+
+
+// --- FUNGSI HALAMAN BOOKING PC ---
+const pcGrid = document.getElementById('pcGrid');
+
+async function initializePCGrid() {
+    // ... (Fungsi Anda sudah benar, tidak perlu diubah)
+    if (!pcGrid) return;
+    pcGrid.innerHTML = '<p style="color: #666;">Loading PC...</p>';
+    try {
+        const response = await fetch('http://localhost:3000/api/pcs');
+        if (!response.ok) throw new Error('Gagal mengambil data PC');
+        const pcStatusFromBackend = await response.json();
+        
+        pcGrid.innerHTML = '';
+        pcStatusFromBackend.forEach(pc => {
+            const pcItem = document.createElement('div');
+            pcItem.classList.add('pc-item');
+            const statusText = pc.isBooked ? 'Dipesan' : 'Tersedia';
+            const statusClass = pc.isBooked ? 'status-booked' : 'status-available';
+            pcItem.innerHTML = `
+                <div class="pc-number">PC ${pc.id}</div>
+                <div class="pc-status ${statusClass}">${statusText}</div>
+            `;
+            if (pc.isBooked) {
+                pcItem.classList.add('booked');
+            } else {
+                pcItem.classList.add('available');
+                pcItem.addEventListener('click', () => selectPC(pc.id, pcItem));
+            }
+            pcGrid.appendChild(pcItem);
+        });
+    } catch (error) {
+        console.error('Error fetching PC data:', error);
+        pcGrid.innerHTML = '<p style="color: red;">Gagal memuat data PC.</p>';
+    }
+}
+
+function selectPC(pcNumber, element) {
+    if (!currentLoggedInUser) {
+        showMessage('login-message', 'Anda harus login untuk booking!', true);
+        showPage('auth');
+        return;
+    }
+    
+    const allPcs = document.querySelectorAll('.pc-item:not(.booked)');
+    allPcs.forEach(pc => pc.style.border = 'none');
+    element.style.border = '3px solid #FFD700';
+    selectedPC = pcNumber;
+    
+    document.getElementById('selectedPC').textContent = `PC ${pcNumber}`;
+    document.getElementById('pcDetails').style.display = 'block';
+
+    resetBookingFlow(); 
+    document.getElementById('bookingSteps').style.display = 'block';
+    document.getElementById('step1').style.display = 'block';
+    document.getElementById('bookingPC').textContent = `(PC ${pcNumber})`;
+}
+
+// --- FUNGSI HALAMAN DAFTAR GAME ---
+const gameGrid = document.getElementById('gameGrid');
+
+async function populateGameGrid(filter = 'all') {
+    // ... (Fungsi Anda sudah benar, tidak perlu diubah)
+    if (!gameGrid) return;
+    gameGrid.innerHTML = '<p style="color: #666; text-align: center;">Loading data game...</p>';
+    try {
+        const response = await fetch('http://localhost:3000/api/games');
+        if (!response.ok) throw new Error(`Gagal mengambil data game: ${response.statusText}`);
+        const allGames = await response.json();
+        gameGrid.innerHTML = '';
+        const filteredGames = (filter === 'all') ? allGames : allGames.filter(game => game.genre === filter);
+        if (filteredGames.length === 0) {
+             gameGrid.innerHTML = `<p style="color: #666; text-align: center;">Tidak ada game ditemukan.</p>`;
+             return;
+        }
+        filteredGames.forEach(game => {
+            const gameCard = document.createElement('div');
+            gameCard.classList.add('game-card');
+            gameCard.innerHTML = `
+                <div class="game-image" style="font-size: 48px;">${game.icon || '🎮'}</div>
+                <div class="game-info">
+                    <div class="game-title">${game.title}</div>
+                    <div class="game-genre">${game.genre.toUpperCase()}</div>
+                </div>
+            `;
+            gameGrid.appendChild(gameCard);
+        });
+    } catch (error) {
+        console.error('Error fetching game data:', error);
+        gameGrid.innerHTML = '<p style="color: red; text-align: center;">Gagal memuat data game.</p>';
+    }
+}
+
+function filterGames(event, genre) {
+    // ... (Fungsi Anda sudah benar, tidak perlu diubah)
+    document.querySelectorAll('.game-filters .filter-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    event.target.classList.add('active');
+    populateGameGrid(genre);
+}
+
+// --- FUNGSI ALUR BOOKING & ADD-ONS ---
+
+function selectDuration(element, hours, price) {
+    // ... (Fungsi Anda sudah benar, tidak perlu diubah)
+    document.querySelectorAll('.duration-card').forEach(card => card.classList.remove('selected'));
+    element.classList.add('selected');
+    selectedDuration = { hours, price };
+    document.getElementById('step2').style.display = 'block';
+    document.getElementById('step3_addons').style.display = 'none';
+    document.getElementById('step4_konfirmasi').style.display = 'none';
+    selectedAddons = []; 
+    updateSummary();
+}
+
+function selectPayment(element, methodName) {
+    // ... (Fungsi Anda sudah benar, tidak perlu diubah)
+    document.querySelectorAll('.payment-card').forEach(card => card.classList.remove('selected'));
+    element.classList.add('selected');
+    selectedPayment = methodName;
+    document.getElementById('step3_addons').style.display = 'block';
+    document.getElementById('step4_konfirmasi').style.display = 'none';
+    populateFoodMenus('bookingAddonGrid', 'booking'); 
+    updateSummary();
+}
+
+async function populateFoodMenus(gridId, type) {
+    // ... (Fungsi Anda sudah benar, tidak perlu diubah)
+    const grid = document.getElementById(gridId);
+    if (!grid) return;
+    grid.innerHTML = '<p style="color: #666;">Loading menu...</p>';
+    if (globalFoodMenu.length === 0) {
+        try {
+            const response = await fetch('http://localhost:3000/api/food/menu');
+            if (!response.ok) throw new Error('Gagal mengambil menu');
+            globalFoodMenu = await response.json();
+        } catch (error) {
+            console.error(error);
+            grid.innerHTML = '<p style="color: red;">Gagal memuat menu.</p>';
+            return;
+        }
+    }
+    grid.innerHTML = '';
+    globalFoodMenu.forEach(item => {
+        const itemCard = document.createElement('div');
+        itemCard.classList.add('addon-card');
+        itemCard.innerHTML = `
+            <div class="addon-icon">${item.icon}</div>
+            <div class="addon-name">${item.name}</div>
+            <div class="addon-price">Rp ${item.price.toLocaleString('id-ID')}</div>
+            <div class="addon-qty-controls">
+                <button onclick="updateQty('${item.id}', -1, '${type}')">-</button>
+                <span id="${type}_qty_${item.id}">0</span>
+                <button onclick="updateQty('${item.id}', 1, '${type}')">+</button>
+            </div>
+        `;
+        grid.appendChild(itemCard);
+    });
+}
+
+function updateQty(itemId, change, type) {
+    // ... (Fungsi Anda sudah benar, tidak perlu diubah)
+    const qtySpan = document.getElementById(`${type}_qty_${itemId}`);
+    if (!qtySpan) { console.error(`Span not found: ${type}_qty_${itemId}`); return; }
+    let currentQty = parseInt(qtySpan.textContent);
+    let newQty = Math.max(0, currentQty + change);
+    qtySpan.textContent = newQty;
+    const item = globalFoodMenu.find(f => f.id === itemId);
+    if (!item) return;
+    if (type === 'booking') {
+        const existingItem = selectedAddons.find(a => a.id === itemId);
+        if (newQty > 0) {
+            if (existingItem) { existingItem.qty = newQty; } 
+            else { selectedAddons.push({ id: item.id, qty: newQty }); }
+        } else {
+            selectedAddons = selectedAddons.filter(a => a.id !== itemId);
+        }
+    } else if (type === 'food') {
+        updateFoodTotal();
+    }
+}
+
+function confirmAddons() {
+    // ... (Fungsi Anda sudah benar, tidak perlu diubah)
+    document.getElementById('step3_addons').style.display = 'none';
+    document.getElementById('step4_konfirmasi').style.display = 'block';
+    updateSummary();
+}
+
+function updateSummary() {
+    // ... (Fungsi Anda sudah benar, tidak perlu diubah)
+    let total = selectedDuration.price || 0;
+    const summaryAddonsDiv = document.getElementById('summaryAddons');
+    summaryAddonsDiv.innerHTML = '';
+    if (selectedAddons.length > 0) {
+        selectedAddons.forEach(item => {
+            const menuItem = globalFoodMenu.find(m => m.id === item.id);
+            if (menuItem) {
+                const itemTotal = menuItem.price * item.qty;
+                total += itemTotal;
+                const p = document.createElement('p');
+                p.innerHTML = `${menuItem.name} (x${item.qty}) <span>Rp ${itemTotal.toLocaleString('id-ID')}</span>`;
+                summaryAddonsDiv.appendChild(p);
+            }
+        });
+    } else {
+        summaryAddonsDiv.innerHTML = '<p style="color: #666;">- Tidak ada -</p>';
+    }
+    const formattedTotal = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(total || 0);
+    document.getElementById('summaryPC').textContent = selectedPC ? `PC ${selectedPC}` : '-';
+    document.getElementById('summaryDuration').textContent = selectedDuration.hours ? `${selectedDuration.hours} Jam` : '-';
+    document.getElementById('summaryPayment').textContent = selectedPayment ? selectedPayment : '-';
+    document.getElementById('summaryTotal').textContent = `Total: ${formattedTotal}`;
+}
+
+async function handlePayment() {
+    // FITUR #3: Mengganti alert() dengan inline message
+    const token = localStorage.getItem('playnetToken');
+    const msgElement = document.getElementById('payment-message');
+    msgElement.style.display = 'none';
+
+    if (!token) {
+        showMessage('login-message', 'Anda harus login untuk booking!', true);
+        showPage('auth');
+        return;
+    }
+    if (!selectedPC || !selectedDuration.hours || !selectedPayment) {
+        showMessage('payment-message', 'Harap lengkapi langkah 1 dan 2.', true);
+        return;
+    }
+
+    const payButton = document.getElementById('payButton');
+    payButton.disabled = true;
+    payButton.textContent = 'Memproses...';
+
+    const bookingData = {
+        pc_id: selectedPC,
+        duration_hours: selectedDuration.hours,
+        total_price: selectedDuration.price,
+        payment_method: selectedPayment,
+        addons: selectedAddons
+    };
+
+    try {
+        const response = await fetch('http://localhost:3000/api/booking', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(bookingData)
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Booking gagal.');
+
+        alert(data.message); // Alert sukses di sini boleh karena kita pindah halaman
+        
+        currentLoggedInUser.remaining_time_minutes += data.newRemainingTime;
+        updateUIOnLogin(); 
+
+        resetBookingFlow();
+        initializePCGrid(); 
+        showPage('profile');
+
+    } catch (error) {
+        console.error('Booking error:', error);
+        showMessage('payment-message', error.message, true);
+    } finally {
+        payButton.disabled = false;
+        payButton.textContent = 'Bayar Sekarang';
+    }
+}
+
+function resetBookingFlow() {
+    selectedDuration = { hours: 0, price: 0 };
+    selectedPayment = null;
+    selectedAddons = [];
+    document.getElementById('bookingSteps').style.display = 'none';
+    document.querySelectorAll('#bookingSteps > div').forEach(step => {
+        step.style.display = 'none';
+    });
+    document.querySelectorAll('.duration-card, .payment-card').forEach(c => c.classList.remove('selected'));
+    globalFoodMenu.forEach(item => {
+        const qtySpan = document.getElementById(`booking_qty_${item.id}`);
+        if(qtySpan) qtySpan.textContent = '0';
+    });
+}
+
+// --- FUNGSI HALAMAN PESAN MAKANAN ---
+let foodMenuTotal = 0;
+
+function updateFoodTotal() {
+    foodMenuTotal = 0;
+    globalFoodMenu.forEach(item => {
+        const qtySpan = document.getElementById(`food_qty_${item.id}`);
+        if (qtySpan) {
+            const qty = parseInt(qtySpan.textContent);
+            foodMenuTotal += (item.price * qty);
+        }
+    });
+    const formattedTotal = new Intl.NumberFormat('id-ID', {
+        style: 'currency', currency: 'IDR', minimumFractionDigits: 0
+    }).format(foodMenuTotal || 0);
+    document.getElementById('foodTotal').textContent = formattedTotal;
+}
+
+async function handleFoodOrder() {
+    // FITUR #3: Mengganti alert() dengan inline message
+    const token = localStorage.getItem('playnetToken');
+    const msgElement = document.getElementById('food-order-message');
+    msgElement.style.display = 'none';
+    
+    if (!token) {
+        showMessage('login-message', 'Anda harus login untuk memesan makanan.', true);
+        showPage('auth');
+        return;
+    }
+    
+    const pcNumber = document.getElementById('foodOrderPC').value;
+    if (!pcNumber) {
+        showMessage('food-order-message', 'Silakan masukkan nomor PC Anda.', true);
+        return;
+    }
+    
+    let orderItems = [];
+    globalFoodMenu.forEach(item => {
+        const qtySpan = document.getElementById(`food_qty_${item.id}`);
+        const qty = parseInt(qtySpan.textContent);
+        if (qty > 0) {
+            orderItems.push({ id: item.id, qty: qty });
+        }
+    });
+
+    if (orderItems.length === 0) {
+        showMessage('food-order-message', 'Anda belum memilih item.', true);
+        return;
+    }
+
+    const orderButton = document.getElementById('foodOrderButton');
+    orderButton.disabled = true;
+    orderButton.textContent = 'Mengirim...';
+
+    try {
+        const response = await fetch('http://localhost:3000/api/food/order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ pcNumber, items: orderItems })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Gagal mengirim pesanan');
+
+        showMessage('food-order-message', data.message, false); // Pesan sukses
+        
+        document.getElementById('foodOrderPC').value = '';
+        populateFoodMenus('standaloneFoodGrid', 'food');
+        updateFoodTotal();
+        fetchTransactionHistory(); // Update riwayat di profil
+
+    } catch (error) {
+        console.error('Food order error:', error);
+        showMessage('food-order-message', error.message, true); // Pesan error
+    } finally {
+        orderButton.disabled = false;
+        orderButton.textContent = 'Pesan Sekarang (Bayar di Kasir)';
+    }
+}
+
+// --- FUNGSI RIWAYAT TRANSAKSI ---
+async function fetchTransactionHistory() {
+    const historyDiv = document.getElementById('transactionHistory');
+    historyDiv.innerHTML = '<p style="color: #666; text-align: center;">Memuat riwayat...</p>';
+    
+    const token = localStorage.getItem('playnetToken');
+    if (!token) return;
+
+    try {
+        const response = await fetch('http://localhost:3000/api/booking/history', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) throw new Error('Gagal memuat riwayat transaksi.');
+        
+        const combinedHistory = await response.json();
+        
+        if (combinedHistory.length === 0) {
+            historyDiv.innerHTML = '<p style="color: #666; text-align: center;">Belum ada riwayat transaksi.</p>';
+            return;
+        }
+
+        historyDiv.innerHTML = ''; 
+
+        combinedHistory.forEach(entry => {
+            const card = document.createElement('div');
+            card.className = 'history-card'; 
+
+            const date = new Date(entry.created_at);
+            const formattedDate = date.toLocaleString('id-ID', {
+                day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit'
+            });
+
+            const formattedTotal = new Intl.NumberFormat('id-ID', {
+                style: 'currency', currency: 'IDR', minimumFractionDigits: 0
+            }).format(entry.total_price);
+
+            if (entry.type === 'booking') {
+                let addonsHtml = '';
+                if (entry.addons && entry.addons.length > 0) {
+                    addonsHtml = entry.addons.map(a => 
+                        `<li class="history-addon-item">${a.name} (x${a.qty})</li>`
+                    ).join('');
+                } else {
+                    addonsHtml = '<li class="history-addon-item" style="list-style: none; color: #999;">- Tidak ada add-ons -</li>';
+                }
+                
+                card.innerHTML = `
+                    <div class="history-header">
+                        <strong>Booking PC: #${entry.id}</strong>
+                        <span>${formattedDate}</span>
+                    </div>
+                    <div class="history-body">
+                        <p><strong>PC:</strong> PC ${entry.pc_id}</p>
+                        <p><strong>Durasi:</strong> ${entry.duration_hours} Jam</p>
+                        <p><strong>Rincian Pesanan:</strong></p>
+                        <ul class="history-addon-list">
+                            <li class="history-addon-item">PC (${entry.duration_hours} Jam)</li>
+                            ${addonsHtml}
+                        </ul>
+                    </div>
+                    <div class="history-footer">
+                        <strong>Total: ${formattedTotal}</strong>
+                    </div>
+                `;
+            } else if (entry.type === 'food_order') {
+                let itemsHtml = entry.items.map(item => 
+                    `<li class="history-addon-item">${item.name} (x${item.qty})</li>`
+                ).join('');
+
+                card.innerHTML = `
+                    <div class="history-header" style="background-color: #e0f0ff; border-color: #b0d0ee;">
+                        <strong style="color: #0056b3;">Pesanan Makanan: #${entry.id}</strong>
+                        <span>${formattedDate}</span>
+                    </div>
+                    <div class="history-body">
+                        <p><strong>Diantar ke:</strong> PC ${entry.pc_number}</p>
+                        <p><strong>Rincian Pesanan:</strong></p>
+                        <ul class="history-addon-list">
+                            ${itemsHtml}
+                        </ul>
+                    </div>
+                    <div class="history-footer">
+                        <strong>Total: ${formattedTotal}</strong>
+                    </div>
+                `;
+            }
+            historyDiv.appendChild(card);
+        });
+
+    } catch (error) {
+        console.error(error);
+        historyDiv.innerHTML = '<p style="color: red; text-align: center;">Gagal memuat riwayat.</p>';
+    }
+}
+
+
+// --- INISIALISASI SAAT HALAMAN DIMUAT ---
+document.addEventListener('DOMContentLoaded', () => {
+    checkLoginStatus();
+    initializePCGrid();
+    populateGameGrid('all');
+    
+    // Panggil populateFoodMenus untuk kedua grid
+    // Ini akan mengambil data dari API dan menyimpannya di globalFoodMenu
+    populateFoodMenus('bookingAddonGrid', 'booking');
+    populateFoodMenus('standaloneFoodGrid', 'food');
+});

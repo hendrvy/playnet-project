@@ -1,0 +1,20 @@
+# Abaikan folder dependencies
+/playnet-backend/node_modules
+node_modules
+
+# Abaikan file rahasia
+.env
+/playnet-backend/.env
+
+# Abaikan file database SQLite
+*.db
+playnet.db
+/playnet-backend/playnet.db
+
+# Abaikan log
+*.log
+npm-debug.log
+
+# Abaikan file sistem operasi
+.DS_Store
+Thumbs.db
